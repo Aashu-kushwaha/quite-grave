@@ -38,16 +38,24 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS: Explicit origin whitelist. Set ALLOWED_ORIGINS in .env for production.
-# Default allows common local dev ports only.
-_default_origins = "http://localhost:5173,http://localhost:5174,http://localhost:3000"
-ALLOWED_ORIGINS = [
-    o.strip() for o in os.environ.get("ALLOWED_ORIGINS", _default_origins).split(",") if o.strip()
+# CORS configuration: Allow localhost, Vercel deployments, and custom ALLOWED_ORIGINS
+_default_origins = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:3000",
+    "https://quite-grave.vercel.app"
 ]
+
+env_origins = [
+    o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip() and o.strip() != "*"
+]
+
+ALLOWED_ORIGINS = list(set(_default_origins + env_origins))
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
