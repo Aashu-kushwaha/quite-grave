@@ -30,11 +30,25 @@ def test_full_system_flow():
     print("Health check passed.")
 
     print("\n--- 2. Auth Flow (Signup & Login) ---")
+    from datetime import datetime, timezone, timedelta
+    from models import VerificationCode
+    
     user_email = "test.student@univ.edu"
-    user_pass = "secureSanctuary2026"
+    user_pass = "SecureSanctuary2026!"
+    verification_code = "123456"
+    
+    # Pre-seed verification code in test DB
+    with TestingSessionLocal() as test_db:
+        test_db.query(VerificationCode).filter(VerificationCode.email == user_email).delete()
+        test_db.add(VerificationCode(
+            email=user_email,
+            code=verification_code,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=10)
+        ))
+        test_db.commit()
     
     # Signup
-    signup_res = client.post("/auth/signup", json={"email": user_email, "password": user_pass})
+    signup_res = client.post("/auth/signup", json={"email": user_email, "password": user_pass, "code": verification_code})
     assert signup_res.status_code in [200, 400]
     
     # Login
@@ -98,19 +112,29 @@ def test_full_system_flow():
     print("Feedback submitted to database.")
 
     print("\n--- 5. Advisor & Internal Metrics Dashboards ---")
-    advisor_res = client.get("/metrics/advisor")
+    # Grant admin role to test user for accessing metrics endpoints
+    from models import User
+    with TestingSessionLocal() as test_db:
+        u = test_db.query(User).filter(User.id == user_id).first()
+        if u:
+            u.role = "admin"
+            test_db.commit()
+
+    advisor_res = client.get("/metrics/advisor", headers=headers)
     assert advisor_res.status_code == 200
     assert "activeStudents" in advisor_res.json()
     assert "closureDrivers" in advisor_res.json()
     print("Advisor metrics calculated successfully.")
 
-    internal_res = client.get("/metrics/internal")
+    internal_res = client.get("/metrics/internal", headers=headers)
     assert internal_res.status_code == 200
     assert internal_res.json()["thumbsUpCount"] >= 1
     print(f"Internal metrics: {internal_res.json()['thumbsUpCount']} thumbs up, accuracy: {internal_res.json()['aiAccuracyRate']}%")
 
     print("\n--- 6. Retrain AI Model Endpoint ---")
-    retrain_res = client.post("/admin/retrain")
+    admin_key = os.environ.get("ADMIN_API_KEY", "")
+    admin_headers = {"X-Admin-Api-Key": admin_key} if admin_key else {}
+    retrain_res = client.post("/admin/retrain", headers=admin_headers)
     assert retrain_res.status_code == 200
     assert retrain_res.json()["status"] == "success"
     print(f"Admin retrain completed: {retrain_res.json()['message']}")

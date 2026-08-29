@@ -15,6 +15,10 @@ import json
 import re
 from typing import TypedDict, List, Dict, Any, Optional
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from langgraph.graph import StateGraph, END
 from langchain_groq import ChatGroq
 

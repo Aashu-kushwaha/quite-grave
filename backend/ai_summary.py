@@ -1,7 +1,10 @@
 import os
 import re
+from dotenv import load_dotenv
 from groq import Groq
 from typing import Dict, List, Any
+
+load_dotenv()
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
@@ -42,11 +45,11 @@ Write the summary now."""
         response = client.chat.completions.create(
             model="qwen/qwen3.6-27b",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=200
+            max_tokens=500
         )
         content = response.choices[0].message.content or ""
-        # Clean thinking blocks
-        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+        # Clean thinking blocks (both closed and unclosed)
+        content = re.sub(r'<think>.*?(?:</think>|$)', '', content, flags=re.DOTALL).strip()
         if not content:
             return f"You've let go of {stats['total_quit']} items, usually citing '{stats['most_common_tag']}' after an average of {stats['avg_days_to_quit']} days."
         return content
