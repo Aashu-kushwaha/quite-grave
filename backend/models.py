@@ -65,3 +65,11 @@ class AIFeedback(Base):
     rating = Column(Integer, nullable=False)  # 1 for thumbs up, -1 for thumbs down
     feedback_text = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class VerificationCode(Base):
+    __tablename__ = "verification_codes"
+    id = Column(Integer, primary_key=True)
+    email = Column(String, index=True, nullable=False)
+    code = Column(String(6), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

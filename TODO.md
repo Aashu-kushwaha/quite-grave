@@ -24,7 +24,10 @@
 
 ### [ ] Implement Refresh Token System (HttpOnly)
 **Context:** Because Gravequit does not currently use a complex "Refresh Token" system (where a short-lived 15-minute access token is constantly refreshed in the background using an HttpOnly cookie), the expiration time on this JWT dictates exactly how long a user can stay logged into the app before they are abruptly kicked out and forced to type their password again.
-**Action Required:** Implement a robust background refresh token rotation using strict `HttpOnly`, `Secure`, `SameSite=Strict` cookies to drastically improve both UX and security posture.
+**Action Required:**
+- Configure `axios` interceptors on frontend to automatically handle 401s and trigger token refresh flows gracefully without booting users abruptly.
+- Transition from LocalStorage to `HttpOnly` Secure cookies for all sensitive tokens (access + refresh) before production.
+- Use strict `HttpOnly`, `Secure`, `SameSite=Strict` cookies to drastically improve both UX and security posture.
 
 ---
 
@@ -33,6 +36,10 @@
 ### [ ] Automate ML Retraining via GitHub Actions
 **Context:** The risk prediction model needs to be continuously updated with fresh data.
 **Action Required:** Create a `.github/workflows/retrain.yml` cron job to automatically ping the `POST /admin/retrain` endpoint. **Crucial:** You must use GitHub Secrets for the `ADMIN_API_KEY` header and not hardcode any keys in the YAML file.
+
+### [ ] Transition Email Provider to Resend/SendGrid
+**Context:** For MVP, we are using a Gmail App Password (Option A) to send 6-digit verification codes. This doesn't scale well and has rate limits.
+**Action Required:** Transition the `backend/email_utils.py` to use a professional SMTP provider like Resend or SendGrid (Option B). This requires setting up DNS records on a custom domain (e.g., `noreply@gravequit.com`) and updating the `.env` variables accordingly.
 
 ---
 

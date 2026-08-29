@@ -154,13 +154,33 @@ export const GravequitProvider = ({ children }) => {
     }
   };
 
-  const signup = async (email, password) => {
+  const sendVerificationCode = async (email, password) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/send-verification-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to send verification code.');
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const signup = async (email, password, code) => {
     setIsLoading(true);
     try {
       const res = await fetch(`${API_BASE}/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email, password, code })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -471,6 +491,7 @@ export const GravequitProvider = ({ children }) => {
       isAuthenticated: !!token,
       login,
       signup,
+      sendVerificationCode,
       loginWithGoogle,
       logout,
       items,

@@ -13,21 +13,70 @@ export const QuitFlowModal = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState('');
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [showPrePrompt, setShowPrePrompt] = useState(false);
+  const [hasSeenPrePrompt, setHasSeenPrePrompt] = useState(false);
+  const recognitionRef = React.useRef(null);
 
   if (!isQuitModalOpen || !activeQuitItem) return null;
 
+  const startActualRecording = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Your browser does not support voice recording.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsRecording(true);
+      setVoiceTranscript('');
+    };
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setVoiceTranscript(transcript);
+    };
+
+    recognition.onerror = (event) => {
+      console.error("Speech recognition error:", event.error);
+      setIsRecording(false);
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
+
   const toggleRecording = () => {
     if (!isRecording) {
-      setIsRecording(true);
-      // Simulate audio transcription
-      setTimeout(() => {
-        setIsRecording(false);
-        setVoiceTranscript("I realized my exam prep required more hours this week, so I paused this project without guilt.");
-        setSelectedTag('Too Busy');
-      }, 2500);
+      if (!hasSeenPrePrompt) {
+        setShowPrePrompt(true);
+        return;
+      }
+      startActualRecording();
     } else {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
       setIsRecording(false);
     }
+  };
+
+  const handleAllowMic = () => {
+    setHasSeenPrePrompt(true);
+    setShowPrePrompt(false);
+    startActualRecording();
+  };
+
+  const handleDenyMic = () => {
+    setShowPrePrompt(false);
   };
 
   const handleSubmit = (e) => {
@@ -171,6 +220,30 @@ export const QuitFlowModal = () => {
             </div>
           </div>
         </form>
+
+        {/* Pre-Prompt Overlay */}
+        {showPrePrompt && (
+          <div className="absolute inset-0 z-10 bg-[#1A1A1A]/95 backdrop-blur-sm rounded-[16px] flex flex-col items-center justify-center p-8 animate-fade-in text-center border border-[#2A2A2A]">
+            <div className="w-12 h-12 rounded-full bg-[#354F3E] flex items-center justify-center text-[#B0CEB8] mb-4 shadow-lg border border-[#A8C5B0]/30">
+              <Mic className="w-6 h-6" />
+            </div>
+            <h3 className="text-xl font-bold font-headline text-[#F5F5F0] mb-2">Enable Voice Notes</h3>
+            <p className="text-sm text-[#8A8A8A] mb-8 leading-relaxed">
+              Gravequit can instantly transcribe your raw thoughts into your journal. To do this, we need temporary access to your microphone when you record.
+            </p>
+            <div className="flex flex-col gap-3 w-full max-w-[240px]">
+              <Button variant="primary" onClick={handleAllowMic} className="w-full justify-center">
+                Grant Access
+              </Button>
+              <Button variant="secondary" onClick={handleDenyMic} className="w-full justify-center text-[#8A8A8A]">
+                Maybe Later
+              </Button>
+            </div>
+            <p className="text-[10px] text-[#8A8A8A]/50 mt-6 mt-auto">
+              Your browser will ask for final permission next.
+            </p>
+          </div>
+        )}
 
       </div>
     </div>

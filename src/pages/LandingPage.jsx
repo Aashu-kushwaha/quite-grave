@@ -5,9 +5,11 @@ import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { TagPill } from '../components/TagPill';
 import { VALID_REASON_TAGS } from '../data/mockData';
+import { useGravequit } from '../context/GravequitContext';
 
 export const LandingPage = () => {
   const navigate = useNavigate();
+  const { user } = useGravequit();
 
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-[#F5F5F0]">
@@ -32,12 +34,14 @@ export const LandingPage = () => {
 
           <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-4">
             <Button size="lg" variant="primary" onClick={() => navigate('/items')}>
-              <span>Start Your Journal</span>
+              <span>{user ? 'Go to My Items' : 'Start Your Journal'}</span>
               <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
-            <Button size="lg" variant="secondary" onClick={() => navigate('/login')}>
-              Log In
-            </Button>
+            {!user && (
+              <Button size="lg" variant="secondary" onClick={() => navigate('/login')}>
+                Log In
+              </Button>
+            )}
             <Button size="lg" variant="secondary" onClick={() => navigate('/about')}>
               Read Our Story
             </Button>
@@ -137,9 +141,53 @@ export const LandingPage = () => {
           </div>
 
           <div className="text-center pt-8">
-            <Button size="lg" variant="primary" onClick={() => navigate('/login')}>
-              Create Student Account
-            </Button>
+            {user ? (
+              <Button size="lg" variant="primary" onClick={() => navigate('/dashboard')}>
+                Go to Dashboard
+              </Button>
+            ) : (
+              <Button size="lg" variant="primary" onClick={() => navigate('/login')}>
+                Create Student Account
+              </Button>
+            )}
+          </div>
+
+          {/* Product Hunt Embed */}
+          <div className="pt-24 pb-12 flex justify-center">
+            
+            <div className="bg-[#131313] border border-[#2A2A2A] rounded-2xl p-8 shadow-xl max-w-md w-full flex flex-col items-center">
+              {/* Product Info Block */}
+              <div className="flex items-center gap-4 mb-8 text-left w-full">
+                <img 
+                  alt="Gravequit" 
+                  src="https://ph-files.imgix.net/aa3a9cda-aa26-413a-9fab-b9a5eb9a8a4a.jpeg?auto=compress,format&codec=mozjpeg&cs=strip&fit=crop&h=80&w=80" 
+                  className="w-16 h-16 rounded-xl object-cover flex-shrink-0 shadow-lg border border-[#2A2A2A]"
+                />
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-xl font-bold font-headline text-[#F5F5F0] truncate">Gravequit</h3>
+                  <p className="text-sm text-[#8A8A8A] mt-1 leading-snug">Quiet Closure & Quitting Insights for Students</p>
+                </div>
+              </div>
+
+              {/* PH Badge */}
+              <div className="flex flex-col items-center gap-3 w-full border-t border-[#2A2A2A] pt-6">
+                <span className="text-[10px] text-[#8A8A8A] font-mono uppercase tracking-widest">As Seen On</span>
+                <a 
+                  href="https://www.producthunt.com/products/gravequit?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-gravequit" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="hover:opacity-80 transition-opacity"
+                >
+                  <img 
+                    src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1233273&theme=dark&t=1787770233121" 
+                    alt="Gravequit - Quiet Closure & Quitting Insights for Students | Product Hunt" 
+                    width="250" 
+                    height="54" 
+                  />
+                </a>
+              </div>
+            </div>
+
           </div>
 
         </div>

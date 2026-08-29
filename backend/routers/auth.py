@@ -6,11 +6,14 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone, timedelta
 
 from database import get_db
-from models import User
+from models import User, VerificationCode
 from auth_utils import hash_password, verify_password, create_access_token
 from auth import get_current_user
-from schemas import UserSignup, UserLogin, GoogleLoginRequest, AuthResponse, UserResponse, UserSettingsUpdate
+from schemas import UserSignup, UserLogin, GoogleLoginRequest, AuthResponse, UserResponse, UserSettingsUpdate, SendCodeRequest
 from security_logger import security_logger
+import random
+import string
+from email_utils import send_verification_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -98,18 +101,61 @@ def google_auth(google_req: GoogleLoginRequest, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/send-verification-code")
+def send_verification_code(req: SendCodeRequest, db: Session = Depends(get_db)):
+    email_clean = req.email.strip().lower()
+    
+    # Check if user already exists
+    existing = db.query(User).filter(User.email == email_clean).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="An account with this email already exists.")
+        
+    # Generate 6 digit code
+    code = ''.join(random.choices(string.digits, k=6))
+    
+    # Store in DB, expiring in 10 minutes
+    expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+    
+    # Remove any existing code for this email
+    db.query(VerificationCode).filter(VerificationCode.email == email_clean).delete()
+    
+    new_code = VerificationCode(
+        email=email_clean,
+        code=code,
+        expires_at=expires
+    )
+    db.add(new_code)
+    db.commit()
+    
+    # Send email
+    success = send_verification_email(email_clean, code)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to send verification email. Please try again.")
+        
+    return {"message": "Verification code sent."}
+
 @router.post("/signup", response_model=AuthResponse)
 def signup(user_data: UserSignup, db: Session = Depends(get_db)):
     email_clean = user_data.email.strip().lower()
-    if not email_clean or "@" not in email_clean:
-        raise HTTPException(status_code=400, detail="Invalid email address format.")
-    
-    if len(user_data.password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
         
     existing = db.query(User).filter(User.email == email_clean).first()
     if existing:
         raise HTTPException(status_code=400, detail="An account with this email already exists.")
+        
+    # Verify the code
+    code_record = db.query(VerificationCode).filter(
+        VerificationCode.email == email_clean,
+        VerificationCode.code == user_data.code
+    ).first()
+    
+    if not code_record:
+        raise HTTPException(status_code=400, detail="Invalid verification code.")
+        
+    if code_record.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Verification code has expired. Please request a new one.")
+        
+    # Code is valid, delete it
+    db.delete(code_record)
         
     hashed = hash_password(user_data.password)
     new_user = User(
