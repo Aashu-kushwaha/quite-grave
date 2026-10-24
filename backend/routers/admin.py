@@ -1,5 +1,5 @@
-import os
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 import numpy as np
 
@@ -7,106 +7,177 @@ from database import get_db
 from models import Item
 from ml_model import risk_model
 from security_logger import security_logger
+from auth import require_admin
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "")
 
-@router.post("/retrain")
+@router.post(
+    "/retrain",
+    dependencies=[Depends(require_admin)]
+)
 def retrain_model(
     request: Request,
-    x_admin_api_key: str = Header(default=None, alias="X-Admin-Api-Key"),
     db: Session = Depends(get_db)
 ):
     """
-    Retrains the Logistic Regression model based on real, historical
-    resolved items (quit or completed) from the database.
-    Optionally protected by X-Admin-Api-Key header if configured.
+    Retrain the quit-risk model using historical resolved items.
+    Only authenticated admin users can access this endpoint.
     """
+
     forwarded = request.headers.get("x-forwarded-for", "")
-    client_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
-    
-    if not ADMIN_API_KEY:
-        # Fail-closed: if the key is not configured, block all access
-        security_logger.critical(f"Admin retrain endpoint accessed but ADMIN_API_KEY is not configured - IP: {client_ip}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Admin endpoint is not configured. Set ADMIN_API_KEY in environment."
+    client_ip = (
+        forwarded.split(",")[0].strip()
+        if forwarded
+        else (
+            request.client.host
+            if request.client
+            else "unknown"
+        )
+    )
+
+    security_logger.info(
+        f"Admin retrain endpoint accessed - IP: {client_ip}"
+    )
+
+    # Fetch resolved items
+    items = (
+        db.query(Item)
+        .filter(Item.status.in_(["quit", "completed"]))
+        .all()
+    )
+
+    # Use baseline training when insufficient records exist
+    if len(items) < 6:
+        risk_model.train_on_synthetic_data()
+
+        security_logger.info(
+            f"Model trained using baseline data. "
+            f"Database records: {len(items)}"
         )
 
-    if x_admin_api_key != ADMIN_API_KEY:
-        # Check if the header was provided
-        if not x_admin_api_key:
-            security_logger.warning(f"Unauthorized attempt to access admin retrain endpoint (missing key) - IP: {client_ip}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Admin API key required in 'X-Admin-Api-Key' header."
-            )
-        else:
-            security_logger.warning(f"Unauthorized attempt to access admin retrain endpoint (invalid key) - IP: {client_ip}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid Admin API key."
-            )
-            
-    # Fetch all resolved items from the database
-    items = db.query(Item).filter(Item.status.in_(["quit", "completed"])).all()
-    
-    if len(items) < 6:
-        # Not enough live items in DB yet, train on enriched baseline synthetic + available DB data
-        risk_model.train_on_synthetic_data()
         return {
             "status": "success",
-            "message": f"Retrained on baseline model (found {len(items)} database records, minimum 6 needed for full dynamic regression). Model is warm and operational.",
+            "message": (
+                f"Retrained using the baseline model. Found "
+                f"{len(items)} database records; at least 6 "
+                f"are needed for full dynamic regression."
+            ),
             "records_used": len(items),
             "mode": "hybrid_baseline"
         }
-        
+
     X_list = []
     y_list = []
-    
+
     for item in items:
-        if not item.ended_at:
+        if not item.ended_at or not item.started_at:
             continue
-            
-        started = item.started_at.replace(tzinfo=None) if item.started_at.tzinfo else item.started_at
-        ended = item.ended_at.replace(tzinfo=None) if item.ended_at.tzinfo else item.ended_at
+
+        started = (
+            item.started_at.replace(tzinfo=None)
+            if item.started_at.tzinfo
+            else item.started_at
+        )
+
+        ended = (
+            item.ended_at.replace(tzinfo=None)
+            if item.ended_at.tzinfo
+            else item.ended_at
+        )
+
         days_active = max(1, (ended - started).days)
-        
-        # Prevent data leakage: only look at past items that ended BEFORE this item started
-        past_items = db.query(Item).filter(
-            Item.user_id == item.user_id,
-            Item.ended_at != None,
-            Item.ended_at < item.started_at
-        ).all()
-        
-        user_total_quit = sum(1 for i in past_items if i.status == "quit")
-        user_total_completed = sum(1 for i in past_items if i.status == "completed")
-        
+
+        # Use only items resolved before this item started.
+        past_items = (
+            db.query(Item)
+            .filter(
+                Item.user_id == item.user_id,
+                Item.ended_at.isnot(None),
+                Item.ended_at < item.started_at
+            )
+            .all()
+        )
+
+        user_total_quit = sum(
+            1 for past_item in past_items
+            if past_item.status == "quit"
+        )
+
+        user_total_completed = sum(
+            1 for past_item in past_items
+            if past_item.status == "completed"
+        )
+
         target = 1 if item.status == "quit" else 0
-        
-        X_list.append([days_active, user_total_quit, user_total_completed])
+
+        X_list.append([
+            days_active,
+            user_total_quit,
+            user_total_completed
+        ])
+
         y_list.append(target)
-        
-    X = np.array(X_list)
-    y = np.array(y_list)
-    
+
+    # Handle records without usable timestamps
+    if not X_list:
+        security_logger.warning(
+            "Retraining skipped: no records had valid start/end timestamps."
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No usable historical records found for retraining."
+        )
+
+    X = np.array(X_list, dtype=float)
+    y = np.array(y_list, dtype=int)
+
+    # A classifier needs examples from both classes
     if len(np.unique(y)) < 2:
         risk_model.train_on_synthetic_data()
-        security_logger.info(f"ML Model retrained successfully - Mode: regularized_prior, Records: {len(X)}")
+
+        class_name = "quit" if y[0] == 1 else "completed"
+
+        security_logger.info(
+            f"Model trained using baseline fallback. "
+            f"Observed class: {class_name}; records: {len(X)}"
+        )
+
         return {
             "status": "success",
-            "message": f"Dataset contains only single class ({'quit' if y[0]==1 else 'completed'}). Retrained with regularized priors.",
+            "message": (
+                f"The historical dataset contains only the "
+                f"'{class_name}' class. The baseline model was trained instead."
+            ),
             "records_used": len(X),
             "mode": "regularized_prior"
         }
-        
-    risk_model.train(X, y)
-    
-    security_logger.info(f"ML Model retrained successfully - Mode: live_data, Records: {len(X)}")
+
+    # Train on historical records
+    try:
+        risk_model.train(X, y)
+    except Exception:
+        security_logger.exception(
+            "Model retraining failed."
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Model retraining failed. Check the backend logs."
+        )
+
+    security_logger.info(
+        f"ML model retrained successfully. "
+        f"Mode: live_data; records: {len(X)}"
+    )
+
     return {
         "status": "success",
-        "message": f"Successfully retrained ML quit-risk model on {len(X)} real database records.",
+        "message": (
+            f"Successfully retrained the quit-risk model "
+            f"using {len(X)} historical database records."
+        ),
         "records_used": len(X),
         "mode": "live_data"
     }
